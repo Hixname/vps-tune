@@ -1,72 +1,92 @@
-# 发布到 GitHub
+# 发布 v2 到 GitHub
 
-## 1. 目标仓库
+目标仓库：[`Hixname/vps-tune`](https://github.com/Hixname/vps-tune)。
 
-本发布包已经绑定：
-
-```text
-https://github.com/Hixname/vps-tune
-```
-
-仓库当前如果只有 `vps-tune-github.zip`，需要把压缩包内的文件放到仓库根目录；仅上传 ZIP 无法提供一键安装地址。
-
-## 2. 替换仓库中的 ZIP
-
-在发布包所在目录执行：
+## 1. 进入本地仓库
 
 ```bash
-git clone https://github.com/Hixname/vps-tune.git vps-tune
-unzip vps-tune-github.zip -d vps-tune-package
-cp -R vps-tune-package/vps-tune-github/. vps-tune/
-cd vps-tune
+cd "/Users/me/Documents/Codex/2026-08-03/alieismy-debian-vps-tuning-https-github/outputs/vps-tune"
 ```
 
-删除仓库里原来单独上传的 ZIP，然后提交真正的项目文件：
+## 2. 检查改动
 
 ```bash
-git rm vps-tune-github.zip
-git add .
-git commit -m "feat: add mmwx VPS tuning wrapper"
+git status --short
+git diff --check
+```
+
+确认没有 SSH 私钥、妙妙屋X token、Agent 配置、Xray 私钥或其他秘密。
+
+## 3. 运行发布检查
+
+```bash
+bash tests/static-check.sh
+```
+
+必须看到所有脚本 `OK`、公式测试通过和最终的“静态检查通过”。
+
+## 4. 提交 v2
+
+```bash
+git add .github/workflows/ci.yml CHANGELOG.md PUBLISHING.md README.md SECURITY.md \
+  SHA256SUMS install.sh mmwx-vps-tune.sh tests/formula-test.sh tests/static-check.sh
+
+git commit -m "feat: add v2 interactive tuning workflow"
+```
+
+## 5. 推送 main
+
+```bash
 git push origin main
 ```
 
-完成后，仓库根目录应直接看到 `install.sh`、`mmwx-vps-tune.sh`、`README.md` 和 `.github`，而不是只看到一个 ZIP。不要把 SSH 私钥、妙妙屋X token、Agent 配置或 Xray 私钥复制进仓库。
+## 6. 检查 GitHub Actions
 
-## 3. 检查 GitHub Actions
+```bash
+gh run list --repo Hixname/vps-tune --limit 3
+```
 
-进入仓库的 **Actions** 页面，确认 `static-check` 工作流通过。工作流会执行：
+打开最新运行并确认 `static-check` 成功。工作流包括 Bash 语法、ShellCheck、安装器主脚本哈希、项目 SHA-256、三档公式和安全边界测试。
 
-- Bash 语法检查；
-- ShellCheck；
-- 安装器内置主脚本哈希检查；
-- `SHA256SUMS` 检查。
+## 7. 从 GitHub 公网预检
 
-## 4. 在 VPS 上使用
-
-root shell：
+先在测试 VPS 下载并打开菜单：
 
 ```bash
 curl -fsSL \
   https://raw.githubusercontent.com/Hixname/vps-tune/main/install.sh |
-  bash -s -- apply
+  bash
 ```
 
-更稳妥的审查式安装方法见 [`README.md`](README.md)。
+正式发布前至少完成：
 
-## 5. 创建首个 Release
+1. 全新安装；
+2. 三档公式摘要检查；
+3. 带宽和自定义 RTT；
+4. 带软链接的 sysctl 冲突迁移；
+5. 立即生效检测；
+6. 重启后生效检测；
+7. 覆盖重新安装；
+8. 恢复原始状态；
+9. 确认原 sysctl 文件哈希与内容恢复；
+10. 确认妙妙屋X节点全程可用。
 
-确认 Actions 通过并完成目标 VPS 验证后再创建版本标签：
+## 8. 创建 v2.0.0 标签
+
+只有 Actions 和目标 VPS 测试全部通过后才执行：
 
 ```bash
-git tag -a v1.1.0 -m "mmwx-vps-tune v1.1.0"
-git push origin v1.1.0
+git tag -a v2.0.0 -m "vps-tune v2.0.0"
+git push origin v2.0.0
 ```
 
-随后在 GitHub 的 **Releases → Draft a new release** 中选择 `v1.1.0`，附上 ZIP 和 `SHA256SUMS`。正式发布前请至少验证：
+## 9. 创建 GitHub Release
 
-1. `preflight`；
-2. `apply`；
-3. 立即 `verify`；
-4. 重启后 `verify`；
-5. `rollback`；
-6. 原有妙妙屋X节点连通性。
+在 GitHub 的 **Releases → Draft a new release** 中选择 `v2.0.0`，附上：
+
+```text
+vps-tune-github.zip
+vps-tune-github.zip.sha256
+```
+
+Release 说明应明确：上游仍为 `v0.1.0-rc.8`，极限档位不适合作为 1 GiB VPS 的默认选择，首次公开使用前应保留服务商控制台或快照。

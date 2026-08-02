@@ -20,4 +20,6 @@ jobs:
           sudo apt-get install -y shellcheck
 
       - name: Run static checks
-        run: bash tests/static-check.sh
+        run: |
+          shellcheck --version
+          bash tests/static-check.sh

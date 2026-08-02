@@ -8,9 +8,11 @@ cd "$PROJECT_ROOT"
 bash -n mmwx-vps-tune.sh
 bash -n install.sh
 bash -n tests/static-check.sh
+bash -n tests/formula-test.sh
 
 if command -v shellcheck >/dev/null 2>&1; then
-  shellcheck mmwx-vps-tune.sh install.sh tests/static-check.sh
+  shellcheck -x -P SCRIPTDIR \
+    mmwx-vps-tune.sh install.sh tests/static-check.sh tests/formula-test.sh
 else
   printf '[!] shellcheck 未安装，仅完成 Bash 语法检查。\n' >&2
 fi
@@ -25,9 +27,13 @@ actual_main="$(sha256sum mmwx-vps-tune.sh | awk '{print $1}')"
 sha256sum -c SHA256SUMS
 
 grep -Fq "readonly UPSTREAM_COMMIT='7bdd57d9de275ae614132272fea0d92632218426'" mmwx-vps-tune.sh
-grep -Fq "readonly WRAPPER_VERSION='1.1.0'" mmwx-vps-tune.sh
-grep -Fq "readonly INSTALLER_VERSION='1.1.0'" install.sh
+grep -Fq "readonly WRAPPER_VERSION='2.0.0'" mmwx-vps-tune.sh
+grep -Fq "readonly INSTALLER_VERSION='2.0.0'" install.sh
 grep -Fq "readonly DEFAULT_REPOSITORY='Hixname/vps-tune'" install.sh
 grep -Fq "PORT_SPEED_MBPS=100..10000" mmwx-vps-tune.sh
+grep -Fq "1. 全新安装（保守 / 激进 / 极限）" mmwx-vps-tune.sh
+grep -Fq "readonly SYSCTL_MIGRATION_MANIFEST=" mmwx-vps-tune.sh
+
+bash tests/formula-test.sh
 
 printf '[+] 静态检查通过。\n'

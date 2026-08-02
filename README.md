@@ -1,65 +1,111 @@
-# mmwx-vps-tune
+# vps-tune
 
-面向妙妙屋X Agent 节点的 Debian VPS 保守型网络调优包装脚本。
+面向妙妙屋X Agent 节点的 Debian VPS 可验证、可覆盖重装、可恢复的网络调优菜单脚本。
 
-项目自动识别 Debian 版本、内存档位以及妙妙屋X 的 systemd external、systemd embedded 或 Docker host-network 部署，随后调用固定提交并通过 SHA-256 校验的 [`alieismy/debian-vps-tuning`](https://github.com/alieismy/debian-vps-tuning) 上游脚本。
+当前版本：`v2.0.0`。项目仓库：[`Hixname/vps-tune`](https://github.com/Hixname/vps-tune)。
 
-> 上游当前是 `v0.1.0-rc.8` 预发布版。执行前请确保服务商网页控制台或快照可用。脚本不会承诺所有线路都会提高峰值速度。
+主机调优事务继续使用固定提交并通过 SHA-256 校验的 [`alieismy/debian-vps-tuning`](https://github.com/alieismy/debian-vps-tuning)。上游仍是 `v0.1.0-rc.8` 预发布版，因此运行前必须保证服务商网页控制台或快照可用。
 
-## 功能
+## 1. 功能
 
-- 自动选择 Debian 12/13、1C1G/1C2G 上游配置；
-- 自动识别 `mmw-agent.service` embedded/external Xray；
-- 检查 Docker Agent 是否运行并使用 `network_mode: host`；
-- 运行时选择 `200 / 500 / 1000 / 自定义` Mbps；
-- 超过 1000 Mbps 时，根据实际带宽和目标 RTT 选择 16/32/64 MiB 缓冲；
-- 下载上游固定 commit，并用内置 SHA-256 校验；
-- 提供 `preflight`、`apply`、`verify`、`status`、`rollback`、`purge`；
-- 不升级 Debian、不修改 UFW、不修改妙妙屋X配置、不自动重启 VPS。
+- 统一编号主菜单；
+- 全新安装时选择保守、激进或极限调优；
+- 带宽选择 `200 / 500 / 1000 / 自定义` Mbps；
+- RTT 选择 `50 / 100 / 150 / 200 / 300 / 自定义` ms；
+- 安全覆盖重新安装；
+- 当前状态、恢复原始状态、生效检测；
+- 自动识别 Debian 12/13、1C1G/1C2G 和妙妙屋X部署方式；
+- 固定上游 commit，并校验四个上游脚本的 SHA-256；
+- sysctl 冲突按真实路径去重，避免软链接重复报告；
+- 经确认后备份并迁移冲突键，恢复时进行哈希保护；
+- 不升级 Debian、不修改 UFW、不修改妙妙屋X配置、不自动重启。
 
-## 支持范围
+## 2. 支持范围
 
 | 项目 | 支持范围 |
 |---|---|
 | 操作系统 | Debian 12 / Debian 13 |
 | 架构 | x86_64 / amd64 |
 | 内存 | 768–3072 MiB |
-| 妙妙屋X | systemd Agent external/embedded，或 Docker host network |
-| 常规带宽 | 100–1000 Mbps |
-| 扩展带宽 | 1001–10000 Mbps，但必须满足 64 MiB 缓冲覆盖边界 |
-| 队列 | 根 fq、fq_codel、noqueue，或 mq + fq/fq_codel 叶子 |
+| 妙妙屋X | systemd embedded/external，Docker host network，或独立 Xray |
+| 输入带宽 | 100–10000 Mbps，仍需通过 64 MiB 缓冲边界检查 |
+| 目标 RTT | 20–500 ms |
+| 队列 | fq、fq_codel、noqueue，或 mq + fq/fq_codel 叶子 |
 
-ARM64、Ubuntu、Alpine、复杂 CAKE/HTB/TBF、策略路由、TProxy、NAT 网关不在支持范围内。
+ARM64、Ubuntu、Alpine、复杂 CAKE/HTB/TBF、TProxy、策略路由和 NAT 网关不在支持范围内。
 
-## 项目仓库
+## 3. 三种调优档位
 
-安装器默认绑定以下公开仓库：
+三档只改变经过验证的 socket 缓冲余量。BBR、fq、backlog、Fast Open、keepalive、journald 和事务回滚基线保持一致，避免加入无法证明有效的“万能 sysctl”。
 
-```text
-Hixname/vps-tune
+| 档位 | BDP 余量 | 最低缓冲 | 适用情况 |
+|---|---:|---:|---|
+| 保守调优 | 1.0× | 8 MiB | 推荐默认；1 GiB、小并发、重视内存稳定性 |
+| 激进调优 | 1.5× | 16 MiB | 高并发、跨境线路、有一定内存余量 |
+| 极限调优 | 2.0× | 32 MiB | 明确了解内存风险并持续监控的场景 |
+
+以 `1000 Mbps / 200 ms` 为例：
+
+| 档位 | 计算后的 socket 上限 |
+|---|---:|
+| 保守 | 24 MiB |
+| 激进 | 36 MiB |
+| 极限 | 48 MiB |
+
+这些数值是单个 socket 可以增长到的上限，不是启动时为每条连接立即分配的内存。极限调优需要输入 `EXTREME` 确认。
+
+## 4. 全新安装：严格按编号执行
+
+### 4.1 保留恢复入口
+
+1. 打开并确认服务商网页控制台可用。
+2. 有快照功能时先创建快照。
+3. 保留当前 SSH 会话，应用后用第二个 SSH 会话测试。
+
+### 4.2 进入 root
+
+```bash
+sudo -i
 ```
 
-仓库地址：[`github.com/Hixname/vps-tune`](https://github.com/Hixname/vps-tune)。如需测试 fork，可临时设置 `MMWX_TUNE_REPO=用户名/仓库名` 覆盖默认地址。
+已经是 `root@主机名` 时跳过此步。
 
-## 一键安装并运行
-
-以下命令需要在 VPS 的 root shell 中执行：
+### 4.3 一键下载并打开菜单
 
 ```bash
 curl -fsSL \
   https://raw.githubusercontent.com/Hixname/vps-tune/main/install.sh |
-  bash -s -- apply
+  bash
 ```
 
-安装器会：
+安装器会校验主脚本 SHA-256，安装为：
 
-1. 下载 `mmwx-vps-tune.sh`；
-2. 校验内置 SHA-256；
-3. 执行 Bash 语法检查；
-4. 安装为 `/usr/local/sbin/mmwx-vps-tune`；
-5. 运行 `apply`。
+```text
+/usr/local/sbin/mmwx-vps-tune
+```
 
-运行时显示带宽菜单：
+### 4.4 主菜单选择 `1`
+
+```text
+1. 全新安装（保守 / 激进 / 极限）
+2. 覆盖重新安装
+3. 当前优化状态
+4. 恢复到原始状态
+5. 生效检测
+0. 退出
+```
+
+### 4.5 选择调优档位
+
+```text
+1) 保守调优（推荐）
+2) 激进调优
+3) 极限调优
+```
+
+不确定时选择 `1`。
+
+### 4.6 选择带宽
 
 ```text
 1) 200 Mbps
@@ -68,107 +114,182 @@ curl -fsSL \
 4) 自定义 100–10000 Mbps
 ```
 
-预检成功后必须输入大写 `APPLY` 才会修改系统。
+按 VPS 套餐的端口带宽选择，不要填写测速软件偶然测得的峰值。
 
-### 推荐的可审查安装方式
+### 4.7 选择目标 RTT
 
-root 级脚本不应在未检查内容时直接管道执行。更稳妥的方式是先下载和阅读：
-
-```bash
-curl -fL -o /root/mmwx-vps-install.sh \
-  https://raw.githubusercontent.com/Hixname/vps-tune/main/install.sh
-
-less /root/mmwx-vps-install.sh
-
-bash /root/mmwx-vps-install.sh apply
+```text
+1) 50 ms
+2) 100 ms
+3) 150 ms
+4) 200 ms
+5) 300 ms
+6) 自定义 20–500 ms
 ```
 
-## 常用命令
+目标 RTT 是希望高速传输可以覆盖的主要线路往返时延。中国到美国等跨境线路不确定时可先使用 `200 ms`；同地区低延迟线路应选择更接近实际值的选项。
 
-只做预检：
+### 4.8 处理 sysctl 冲突
 
-```bash
-mmwx-vps-tune preflight
+如果服务商镜像已经包含 BBR/fq 等配置，脚本会：
+
+1. 使用 `readlink -f` 按真实文件去重；
+2. 完整备份每个原文件；
+3. 只移除本项目即将接管的重复键；
+4. 保存迁移后哈希；
+5. 在恢复菜单中还原原文件。
+
+确认报告中的文件后输入：
+
+```text
+MIGRATE
 ```
 
-应用调优：
+备份位于：
 
-```bash
-mmwx-vps-tune apply
+```text
+/var/lib/mmwx-vps-tune/sysctl-originals
 ```
 
-指定带宽而不显示菜单：
+如果迁移后的文件又被其他程序修改，恢复操作会拒绝覆盖，并保留备份供人工处理。
 
-```bash
-PORT_SPEED_MBPS=1000 mmwx-vps-tune apply
+### 4.9 应用配置
+
+保守或激进档位输入：
+
+```text
+APPLY
 ```
 
-重启后验证：
+极限档位输入：
+
+```text
+EXTREME
+```
+
+### 4.10 测试 SSH 并重启
+
+1. 不要关闭当前 SSH。
+2. 新开第二个 SSH 窗口确认可以登录。
+3. 确认妙妙屋X节点正常在线。
+4. 手动重启：
+
+```bash
+reboot
+```
+
+### 4.11 重启后生效检测
 
 ```bash
 mmwx-vps-tune verify
 ```
 
-查看状态：
+也可以重新打开菜单并选择 `5`。
+
+## 5. 覆盖重新安装：严格按编号执行
+
+适用于修改带宽、RTT、调优档位，或者从 v1 升级到 v2。
+
+1. 打开菜单：
+
+```bash
+mmwx-vps-tune
+```
+
+2. 选择 `2. 覆盖重新安装`。
+3. 重新选择档位、带宽和 RTT。
+4. 检查摘要。
+5. 输入：
+
+```text
+REINSTALL
+```
+
+6. 脚本先通过上游事务回滚并清理脚本创建的 swap。
+7. 原始 sysctl 迁移备份继续保留，不做无意义的恢复再删除。
+8. 按提示输入 `APPLY` 或 `EXTREME`。
+9. 新开 SSH 测试，随后手动重启并执行 `verify`。
+
+不要在参数变化时直接重复执行全新安装；应使用覆盖重新安装。
+
+## 6. 当前优化状态
+
+菜单选择 `3`，或者执行：
 
 ```bash
 mmwx-vps-tune status
 ```
 
-回滚系统配置并保留脚本创建的应急 swap：
+输出包括上游事务状态、带宽、RTT、缓冲、BBR、qdisc、swap、监听端口和服务状态。
+
+## 7. 恢复到原始状态
+
+1. 打开菜单并选择 `4`，或者执行：
 
 ```bash
-mmwx-vps-tune rollback
+mmwx-vps-tune restore
 ```
 
-回滚并安全清理脚本创建的 swap：
+2. 输入：
+
+```text
+RESTORE
+```
+
+3. 脚本恢复原始 qdisc 和 sysctl，移除管理文件，清理脚本创建的 swap，并恢复 v2 自动迁移的 sysctl 原文件。
+4. 如果文件在安装后被外部修改，脚本会拒绝覆盖并保留证据；此时不要手工删除状态目录。
+
+外部原本已经存在的 `/swapfile` 不属于本项目，不会被删除。
+
+## 8. 生效检测
+
+菜单选择 `5`，或者执行：
 
 ```bash
-mmwx-vps-tune purge
+mmwx-vps-tune verify
 ```
 
-## 修改已经应用的带宽
+验证内容包括管理文件哈希、sysctl、qdisc、swap 所有权，以及妙妙屋X/Xray服务。
 
-上游状态不允许直接用不同参数覆盖。先回滚，再重新选择：
+## 9. 非交互参数
+
+明确理解风险后，可通过环境变量指定：
 
 ```bash
-mmwx-vps-tune rollback
-mmwx-vps-tune apply
+TUNING_MODE=conservative \
+PORT_SPEED_MBPS=1000 \
+BUFFER_TARGET_RTT_MS=200 \
+mmwx-vps-tune install
 ```
 
-如果现有 swap 是脚本创建且普通回滚显示 `SWAP_RETAINED`，应先执行：
+完整变量：
 
-```bash
-mmwx-vps-tune purge
-mmwx-vps-tune apply
+```text
+TUNING_MODE=conservative|aggressive|extreme
+PORT_SPEED_MBPS=100..10000
+BUFFER_TARGET_RTT_MS=20..500
+ENABLE_SWAP=0|1
+SWAP_MB=512..4096
+AUTO_APPLY=0|1
+AUTO_MIGRATE_SYSCTL=0|1
+INSTALL_DEPS=0|1
+MMWX_CONTAINER=容器名
 ```
 
-外部已有的 `/swapfile` 不会被本项目删除。
+`AUTO_APPLY=1` 和 `AUTO_MIGRATE_SYSCTL=1` 会跳过人工确认，只适合已经审查日志、具备快照和控制台的自动化环境。
 
-## 自定义高带宽逻辑
+## 10. 高带宽边界
 
-上游已验证输入范围为 100–1000 Mbps，最大 socket 缓冲为 64 MiB。本包装脚本不会修改上游代码：
+上游输入上限是 1000 Mbps。对于超过 1000 Mbps 的真实端口，包装脚本使用上游 1000 Mbps 兼容输入，但仍根据真实带宽、RTT 和档位计算显式缓冲。
 
-- `≤1000 Mbps`：把真实带宽交给上游并使用 `BUF_MAX=auto`；
-- `>1000 Mbps`：使用上游 1000 Mbps 兼容输入，并按真实带宽与 RTT 显式选择缓冲；
-- 理论 BDP 超过 64 MiB：拒绝执行并显示当前 RTT 下的最大安全带宽。
+任何组合一旦需要超过 64 MiB，脚本会拒绝执行，并给出当前档位的最大安全带宽。降低 RTT 或调优档位通常比盲目继续增大缓冲更适合小内存 VPS。
 
-默认 RTT 为 200 ms，此时 64 MiB 大约覆盖 2684 Mbps。可以显式设置实际目标 RTT：
+## 11. 妙妙屋X适配
 
-```bash
-PORT_SPEED_MBPS=2000 BUFFER_TARGET_RTT_MS=150 mmwx-vps-tune apply
-```
-
-缓冲值是单个 socket 可以增长到的上限，并非启动后立即为每条连接分配全部内存。1 GiB VPS 使用 64 MiB 上限时仍应控制并发，并观察内存和 swap。
-
-## 妙妙屋X适配
-
-根据[妙妙屋X Agent 部署文档](https://miaomiaowux.com/docs/install-agent)：
-
-- `external`：严格验证 `mmw-agent.service` 和 `xray.service`；
-- `embedded`：严格验证 `mmw-agent.service`；
-- Docker：检查 `mmw-agent` 容器运行状态和 host 网络模式；
-- 只有妙妙屋X主控、没有 Agent/Xray 时拒绝应用节点调优。
+- systemd embedded：验证 `mmw-agent.service`；
+- systemd external：验证 `mmw-agent.service` 和 `xray.service`；
+- Docker：要求 Agent 容器运行并使用 host network；
+- 只有妙妙屋X主控、没有 Agent/Xray：拒绝应用节点调优。
 
 自定义 Docker 容器名：
 
@@ -176,75 +297,26 @@ PORT_SPEED_MBPS=2000 BUFFER_TARGET_RTT_MS=150 mmwx-vps-tune apply
 MMWX_CONTAINER=my-agent mmwx-vps-tune verify
 ```
 
-## sysctl 冲突
+## 12. 安全与限制
 
-预检会拒绝与其他调优文件重复的键，常见提示如下：
+- 不要公开 SSH 私钥、妙妙屋X token、VLESS UUID 或 REALITY 私钥；
+- 不要删除 `/var/lib/proxy-vps-tuning` 或 `/var/lib/mmwx-vps-tune` 来代替恢复菜单；
+- 上游仍是预发布版，正式使用前应在同规格测试机完成安装、重启、验证和恢复演练；
+- 脚本不能解决物理线路绕路、运营商晚高峰拥塞、宿主机超售或 Xray 加密性能瓶颈；
+- Hysteria2 等 UDP/QUIC 协议受这些 TCP 参数的影响较少。
 
-```text
-sysctl 冲突：net.core.default_qdisc 已在某文件中定义
-sysctl 冲突：net.ipv4.tcp_congestion_control 已在某文件中定义
-sysctl 冲突：vm.swappiness 已在某文件中定义
-```
+更多安全说明见 [`SECURITY.md`](SECURITY.md)，发布步骤见 [`PUBLISHING.md`](PUBLISHING.md)。
 
-不要直接删除未知文件。先查看文件内容和归属：
+## 13. 开发检查
 
-```bash
-stat /etc/sysctl.d/文件名
-dpkg-query -S /etc/sysctl.d/文件名 2>/dev/null || true
-nl -ba /etc/sysctl.d/文件名
-```
-
-确认是自己以前创建的调优文件后，先备份到 `/root`，再人工移除重复键。保留备份，以便回滚后恢复原来的持久配置。
-
-## 应用后的变化
-
-具体由固定上游脚本管理，主要包括：
-
-- BBR + fq；
-- TCP socket 缓冲上限；
-- `somaxconn`、SYN backlog、网卡 backlog；
-- TCP Fast Open、MTU probing 和 keepalive；
-- `vm.swappiness=20`；
-- journald 空间限制；
-- 无活动 swap 时可创建受控的应急 swap；
-- 原始 qdisc、sysctl 和管理文件状态，用于验证与回滚。
-
-脚本不会改善物理线路绕路、运营商晚高峰拥塞、宿主机 CPU 超售或 Xray 加密瓶颈。Hysteria2 等 UDP/QUIC 协议受到这些 TCP 参数的影响也较少。
-
-## 更新
-
-重新执行安装器即可下载安装仓库中的当前脚本，然后运行指定动作：
-
-```bash
-curl -fsSL \
-  https://raw.githubusercontent.com/Hixname/vps-tune/main/install.sh |
-  bash -s -- status
-```
-
-修改 `mmwx-vps-tune.sh` 后，必须同步更新：
-
-1. `install.sh` 内的 `EXPECTED_MAIN_SHA256`；
-2. 根目录的 `SHA256SUMS`；
-3. `CHANGELOG.md`；
-4. 版本号。
-
-运行本地检查：
+修改主脚本后必须同步更新安装器哈希和 `SHA256SUMS`，然后执行：
 
 ```bash
 bash tests/static-check.sh
 ```
 
-## 安全
+检查包括 Bash 语法、ShellCheck、主脚本哈希、项目 SHA-256、三档计算、64 MiB 边界和 sysctl 匹配正则。
 
-- 不要公开妙妙屋X token、VLESS UUID、REALITY 私钥、SSH 私钥或完整配置；
-- 不要把未经检查的 fork 直接交给 root shell；
-- 运行前保留服务商网页控制台或快照；
-- 首次执行建议先运行 `preflight`；
-- 参见 [`SECURITY.md`](SECURITY.md)。
-
-## 上游与许可证
-
-- 主机调优逻辑：[alieismy/debian-vps-tuning](https://github.com/alieismy/debian-vps-tuning)
-- 妙妙屋X文档：[miaomiaowux.com](https://miaomiaowux.com/)
+## 14. 许可证
 
 本包装项目使用 MIT License。上游项目和妙妙屋X分别遵循其自己的许可证和使用条款。

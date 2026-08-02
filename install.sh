@@ -3,14 +3,14 @@
 
 set -Eeuo pipefail
 
-readonly INSTALLER_VERSION='1.1.0'
-readonly EXPECTED_MAIN_SHA256='038c139e75985ed4f032263e188e428ca453e7631a110354970ecb59abc65202'
+readonly INSTALLER_VERSION='2.0.0'
+readonly EXPECTED_MAIN_SHA256='31272bc17e5f0373b964336830c69e1ecba15a7f158e657e36220d22ca9aa25f'
 readonly INSTALL_PATH='/usr/local/sbin/mmwx-vps-tune'
 readonly DEFAULT_REPOSITORY='Hixname/vps-tune'
 
 REPOSITORY="${MMWX_TUNE_REPO:-$DEFAULT_REPOSITORY}"
 REF="${MMWX_TUNE_REF:-main}"
-ACTION="${1:-apply}"
+ACTION="${1:-menu}"
 TEMP_DIR=''
 
 info() { printf '[+] %s\n' "$*"; }
@@ -30,7 +30,7 @@ if [[ ! "$REF" =~ ^[A-Za-z0-9._/-]+$ ]] || [[ "$REF" == *'..'* ]]; then
   die 'MMWX_TUNE_REF 包含不安全字符。'
 fi
 case "$ACTION" in
-  apply | preflight | verify | status | rollback | purge) ;;
+  menu | install | reinstall | apply | preflight | verify | status | restore | rollback | purge) ;;
   *) die "不支持的动作：${ACTION}" ;;
 esac
 
