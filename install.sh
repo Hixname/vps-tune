@@ -4,7 +4,7 @@
 set -Eeuo pipefail
 
 readonly INSTALLER_VERSION='2.0.0'
-readonly EXPECTED_MAIN_SHA256='31272bc17e5f0373b964336830c69e1ecba15a7f158e657e36220d22ca9aa25f'
+readonly EXPECTED_MAIN_SHA256='00756812e7ea7fc73fb2de8eed40064554a69293d5f20444a3dff31f727ae816'
 readonly INSTALL_PATH='/usr/local/sbin/mmwx-vps-tune'
 readonly DEFAULT_REPOSITORY='Hixname/vps-tune'
 

@@ -136,19 +136,22 @@ need_root() {
 
 validate_wrapper_state_paths() {
   if [ -e "$WRAPPER_STATE_DIR" ] || [ -L "$WRAPPER_STATE_DIR" ]; then
-    [ -d "$WRAPPER_STATE_DIR" ] && [ ! -L "$WRAPPER_STATE_DIR" ] &&
-      [ "$(stat -c '%u' "$WRAPPER_STATE_DIR" 2>/dev/null || true)" = '0' ] ||
+    if [ ! -d "$WRAPPER_STATE_DIR" ] || [ -L "$WRAPPER_STATE_DIR" ] ||
+      [ "$(stat -c '%u' "$WRAPPER_STATE_DIR" 2>/dev/null || true)" != '0' ]; then
       die "包装状态目录类型或所有权异常：${WRAPPER_STATE_DIR}"
+    fi
   fi
   if [ -e "$SYSCTL_BACKUP_DIR" ] || [ -L "$SYSCTL_BACKUP_DIR" ]; then
-    [ -d "$SYSCTL_BACKUP_DIR" ] && [ ! -L "$SYSCTL_BACKUP_DIR" ] &&
-      [ "$(stat -c '%u' "$SYSCTL_BACKUP_DIR" 2>/dev/null || true)" = '0' ] ||
+    if [ ! -d "$SYSCTL_BACKUP_DIR" ] || [ -L "$SYSCTL_BACKUP_DIR" ] ||
+      [ "$(stat -c '%u' "$SYSCTL_BACKUP_DIR" 2>/dev/null || true)" != '0' ]; then
       die "sysctl 备份目录类型或所有权异常：${SYSCTL_BACKUP_DIR}"
+    fi
   fi
   if [ -e "$SYSCTL_MIGRATION_MANIFEST" ] || [ -L "$SYSCTL_MIGRATION_MANIFEST" ]; then
-    [ -f "$SYSCTL_MIGRATION_MANIFEST" ] && [ ! -L "$SYSCTL_MIGRATION_MANIFEST" ] &&
-      [ "$(stat -c '%u' "$SYSCTL_MIGRATION_MANIFEST" 2>/dev/null || true)" = '0' ] ||
+    if [ ! -f "$SYSCTL_MIGRATION_MANIFEST" ] || [ -L "$SYSCTL_MIGRATION_MANIFEST" ] ||
+      [ "$(stat -c '%u' "$SYSCTL_MIGRATION_MANIFEST" 2>/dev/null || true)" != '0' ]; then
       die "sysctl 迁移清单类型或所有权异常：${SYSCTL_MIGRATION_MANIFEST}"
+    fi
   fi
   if [ -d "$SYSCTL_BACKUP_DIR" ] && [ ! -f "$SYSCTL_MIGRATION_MANIFEST" ]; then
     die "存在 sysctl 备份目录但缺少迁移清单，拒绝猜测所有权：${SYSCTL_BACKUP_DIR}"
@@ -160,7 +163,9 @@ validate_wrapper_state_paths() {
 
 read_saved_value() {
   local key="$1"
-  [ -f "$WRAPPER_STATE_FILE" ] && [ ! -L "$WRAPPER_STATE_FILE" ] || return 0
+  if [ ! -f "$WRAPPER_STATE_FILE" ] || [ -L "$WRAPPER_STATE_FILE" ]; then
+    return 0
+  fi
   [ "$(stat -c '%u' "$WRAPPER_STATE_FILE" 2>/dev/null || true)" = '0' ] ||
     die "状态文件所有权异常：${WRAPPER_STATE_FILE}"
   awk -F= -v wanted="$key" '$1 == wanted {print $2; exit}' "$WRAPPER_STATE_FILE"
@@ -525,7 +530,9 @@ scan_sysctl_conflicts() {
   for file in /etc/sysctl.conf /etc/sysctl.d/*.conf; do
     [ -f "$file" ] || continue
     canonical="$(readlink -f -- "$file" 2>/dev/null || true)"
-    [ -n "$canonical" ] && [ -f "$canonical" ] || continue
+    if [ -z "$canonical" ] || [ ! -f "$canonical" ]; then
+      continue
+    fi
     [ "$canonical" != "$UPSTREAM_SYSCTL_FILE" ] || continue
     case "$canonical" in
       *$'\n'* | *$'\t'* | *'|'*) die "sysctl 路径包含不支持的字符：${canonical}" ;;
@@ -581,7 +588,9 @@ migrate_sysctl_conflicts() {
       /etc/sysctl.conf | /etc/sysctl.d/*.conf) ;;
       *) die "符号链接目标不在允许的 /etc sysctl 范围内，拒绝自动迁移：${file}" ;;
     esac
-    [ -f "$file" ] && [ ! -L "$file" ] || die "只允许迁移普通文件：${file}"
+    if [ ! -f "$file" ] || [ -L "$file" ]; then
+      die "只允许迁移普通文件：${file}"
+    fi
     uid="$(stat -c '%u' "$file")"
     gid="$(stat -c '%g' "$file")"
     mode="$(stat -c '%a' "$file")"
@@ -617,7 +626,9 @@ restore_sysctl_migrations() {
   MIGRATION_PENDING=0
 
   while IFS=$'\t' read -r original backup backup_hash post_hash; do
-    [ -n "$original" ] && [ -n "$backup" ] || continue
+    if [ -z "$original" ] || [ -z "$backup" ]; then
+      continue
+    fi
     case "$original" in
       /etc/sysctl.conf | /etc/sysctl.d/*.conf) ;;
       *) warn "迁移清单包含不允许的原路径：${original}"; failures=$((failures + 1)); continue ;;

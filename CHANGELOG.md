@@ -29,6 +29,10 @@
 - 覆盖重装需要输入 `REINSTALL`；
 - 完整恢复需要输入 `RESTORE`。
 
+### Fixed
+
+- 将复合状态检查改为明确的 `if` 分支，兼容 GitHub Actions 的 ShellCheck 0.9.0。
+
 ## [1.1.0] - 2026-08-03
 
 ### Added
