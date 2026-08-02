@@ -159,14 +159,16 @@ validate_inputs() {
   [[ "$PORT_SPEED_MBPS" =~ ^[0-9]{3,5}$ ]] ||
     die 'PORT_SPEED_MBPS 必须是 100–10000 的整数。'
   PORT_SPEED_MBPS=$((10#$PORT_SPEED_MBPS))
-  [ "$PORT_SPEED_MBPS" -ge 100 ] && [ "$PORT_SPEED_MBPS" -le 10000 ] ||
+  if [ "$PORT_SPEED_MBPS" -lt 100 ] || [ "$PORT_SPEED_MBPS" -gt 10000 ]; then
     die 'PORT_SPEED_MBPS 必须在 100–10000 之间。'
+  fi
 
   [[ "$BUFFER_TARGET_RTT_MS" =~ ^[0-9]{2,3}$ ]] ||
     die 'BUFFER_TARGET_RTT_MS 必须是 20–500 的整数。'
   BUFFER_TARGET_RTT_MS=$((10#$BUFFER_TARGET_RTT_MS))
-  [ "$BUFFER_TARGET_RTT_MS" -ge 20 ] && [ "$BUFFER_TARGET_RTT_MS" -le 500 ] ||
+  if [ "$BUFFER_TARGET_RTT_MS" -lt 20 ] || [ "$BUFFER_TARGET_RTT_MS" -gt 500 ]; then
     die 'BUFFER_TARGET_RTT_MS 必须在 20–500 之间。'
+  fi
 
   BUFFER_BDP_BYTES=$((PORT_SPEED_MBPS * 125 * BUFFER_TARGET_RTT_MS))
   if [ "$BUFFER_BDP_BYTES" -le 16777216 ]; then
@@ -193,8 +195,9 @@ validate_inputs() {
     die 'ENABLE_SWAP 只能为 0 或 1。'
   [[ "$SWAP_MB" =~ ^[0-9]{3,4}$ ]] || die 'SWAP_MB 必须是整数 MiB。'
   SWAP_MB=$((10#$SWAP_MB))
-  [ "$SWAP_MB" -ge 512 ] && [ "$SWAP_MB" -le 4096 ] ||
+  if [ "$SWAP_MB" -lt 512 ] || [ "$SWAP_MB" -gt 4096 ]; then
     die 'SWAP_MB 必须在 512–4096 之间。'
+  fi
   [ "$AUTO_APPLY" = '0' ] || [ "$AUTO_APPLY" = '1' ] ||
     die 'AUTO_APPLY 只能为 0 或 1。'
   [ "$INSTALL_DEPS" = '0' ] || [ "$INSTALL_DEPS" = '1' ] ||

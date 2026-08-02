@@ -4,7 +4,7 @@
 set -Eeuo pipefail
 
 readonly INSTALLER_VERSION='1.1.0'
-readonly EXPECTED_MAIN_SHA256='8e45da1932cfc9f66d62a3493ee173c6704d9fef58cc2fa2e55350692acb45f7'
+readonly EXPECTED_MAIN_SHA256='038c139e75985ed4f032263e188e428ca453e7631a110354970ecb59abc65202'
 readonly INSTALL_PATH='/usr/local/sbin/mmwx-vps-tune'
 readonly DEFAULT_REPOSITORY='Hixname/vps-tune'
 
@@ -26,8 +26,9 @@ trap cleanup EXIT
 [ "${EUID}" -eq 0 ] || die '请以 root 权限运行安装器。'
 [[ "$REPOSITORY" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] ||
   die 'MMWX_TUNE_REPO 必须使用 GitHub用户名/仓库名 格式。'
-[[ "$REF" =~ ^[A-Za-z0-9._/-]+$ ]] && [[ "$REF" != *'..'* ]] ||
+if [[ ! "$REF" =~ ^[A-Za-z0-9._/-]+$ ]] || [[ "$REF" == *'..'* ]]; then
   die 'MMWX_TUNE_REF 包含不安全字符。'
+fi
 case "$ACTION" in
   apply | preflight | verify | status | rollback | purge) ;;
   *) die "不支持的动作：${ACTION}" ;;
