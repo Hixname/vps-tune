@@ -27,11 +27,15 @@ actual_main="$(sha256sum mmwx-vps-tune.sh | awk '{print $1}')"
 sha256sum -c SHA256SUMS
 
 grep -Fq "readonly UPSTREAM_COMMIT='7bdd57d9de275ae614132272fea0d92632218426'" mmwx-vps-tune.sh
-grep -Fq "readonly WRAPPER_VERSION='2.0.0'" mmwx-vps-tune.sh
-grep -Fq "readonly INSTALLER_VERSION='2.0.0'" install.sh
+grep -Fq "readonly WRAPPER_VERSION='2.1.0'" mmwx-vps-tune.sh
+grep -Fq "readonly INSTALLER_VERSION='2.1.0'" install.sh
 grep -Fq "readonly DEFAULT_REPOSITORY='Hixname/vps-tune'" install.sh
 grep -Fq "PORT_SPEED_MBPS=100..10000" mmwx-vps-tune.sh
 grep -Fq "1. 全新安装（保守 / 激进 / 极限）" mmwx-vps-tune.sh
+grep -Fq "适用于 1H1G/1H2G 日常节点" mmwx-vps-tune.sh
+grep -Fq 'normalize_rtt_input()' mmwx-vps-tune.sh
+grep -Fq 'normalize_bandwidth_input()' mmwx-vps-tune.sh
+grep -Fq 'show_runtime_diagnostics()' mmwx-vps-tune.sh
 grep -Fq "readonly SYSCTL_MIGRATION_MANIFEST=" mmwx-vps-tune.sh
 
 bash tests/formula-test.sh

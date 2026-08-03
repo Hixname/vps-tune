@@ -4,7 +4,7 @@
 
 set -Eeuo pipefail
 
-readonly WRAPPER_VERSION='2.0.0'
+readonly WRAPPER_VERSION='2.1.0'
 readonly UPSTREAM_COMMIT='7bdd57d9de275ae614132272fea0d92632218426'
 readonly UPSTREAM_BASE="https://raw.githubusercontent.com/alieismy/debian-vps-tuning/${UPSTREAM_COMMIT}"
 readonly UPSTREAM_DIR='/usr/local/lib/mmwx-vps-tune'
@@ -65,6 +65,7 @@ PROFILE=''
 PROFILE_PATH=''
 EXPECTED_SHA256=''
 MEMORY_MIB=''
+CPU_COUNT=''
 DEPLOYMENT_MODE='not-checked'
 XRAY_MODE='not-checked'
 PROXY_SERVICE_UNITS=''
@@ -94,7 +95,7 @@ trap cleanup EXIT
 
 usage() {
   cat <<'EOF'
-妙妙屋X Debian VPS 调优脚本 v2
+妙妙屋X Debian VPS 调优脚本 v2.1
 
 用法：
   bash mmwx-vps-tune.sh menu
@@ -116,8 +117,8 @@ usage() {
 
 环境变量：
   TUNING_MODE=conservative|aggressive|extreme
-  PORT_SPEED_MBPS=100..10000      VPS 套餐标称带宽；不设置时显示选择菜单
-  BUFFER_TARGET_RTT_MS=20..500    目标 RTT；不设置时显示选择菜单
+  PORT_SPEED_MBPS=100..10000      VPS 套餐标称带宽；也接受 1000M/1000Mbps
+  BUFFER_TARGET_RTT_MS=20..500    目标 RTT；也接受 175ms/175 ms
   ENABLE_SWAP=0|1                 没有活动 swap 时是否创建，默认 1
   SWAP_MB=512..4096               swap 大小，默认 1024
   AUTO_APPLY=0|1                  设为 1 跳过 APPLY 确认
@@ -127,6 +128,7 @@ usage() {
 
 脚本不会升级系统、修改 UFW、修改妙妙屋X配置或自动重启 VPS。
 三种档位分别使用 1.0x、1.5x、2.0x BDP 缓冲余量；超过 64 MiB 时安全拒绝。
+生效检测会额外显示缓冲覆盖、CPU/内存、swap、默认网卡丢包和 NOFILE 判断。
 EOF
 }
 
@@ -178,6 +180,24 @@ is_configuration_action() {
   esac
 }
 
+normalize_rtt_input() {
+  local compact="${1//[[:space:]]/}"
+  if [[ "$compact" =~ ^([0-9]+)([mM][sS])?$ ]]; then
+    printf '%s\n' "${BASH_REMATCH[1]}"
+    return 0
+  fi
+  return 1
+}
+
+normalize_bandwidth_input() {
+  local compact="${1//[[:space:]]/}"
+  if [[ "$compact" =~ ^([0-9]+)([mM]([bB][pP][sS])?)?$ ]]; then
+    printf '%s\n' "${BASH_REMATCH[1]}"
+    return 0
+  fi
+  return 1
+}
+
 choose_tuning_mode() {
   local saved default_mode choice
   if [ -n "$TUNING_MODE_INPUT" ]; then
@@ -189,9 +209,9 @@ choose_tuning_mode() {
   default_mode="${saved:-conservative}"
   if is_configuration_action && [ -r /dev/tty ]; then
     printf '\n请选择调优档位：\n' >/dev/tty
-    printf '  1) 保守调优（推荐，1.0x BDP，最低 8 MiB）\n' >/dev/tty
-    printf '  2) 激进调优（1.5x BDP，最低 16 MiB）\n' >/dev/tty
-    printf '  3) 极限调优（2.0x BDP，最低 32 MiB，高内存压力）\n' >/dev/tty
+    printf '  1) 保守调优（推荐；适用于 1H1G/1H2G 日常节点；1.0x BDP，最低 8 MiB）\n' >/dev/tty
+    printf '  2) 激进调优（适用于至少 2G 内存、高 RTT/高波动千兆线路；1.5x BDP，最低 16 MiB）\n' >/dev/tty
+    printf '  3) 极限调优（仅适用于至少 2G 内存的专项测试；2.0x BDP，最低 32 MiB）\n' >/dev/tty
     printf '直接回车使用当前/默认档位 %s：' "$default_mode" >/dev/tty
     IFS= read -r choice </dev/tty
     case "$choice" in
@@ -207,9 +227,11 @@ choose_tuning_mode() {
 }
 
 choose_bandwidth() {
-  local saved default_speed choice custom_speed
+  local saved default_speed choice custom_speed normalized
   if [ -n "$PORT_SPEED_MBPS_INPUT" ]; then
-    PORT_SPEED_MBPS="$PORT_SPEED_MBPS_INPUT"
+    normalized="$(normalize_bandwidth_input "$PORT_SPEED_MBPS_INPUT")" ||
+      die 'PORT_SPEED_MBPS 格式无效；可填写 1000、1000M 或 1000Mbps。'
+    PORT_SPEED_MBPS="$normalized"
     return 0
   fi
 
@@ -221,7 +243,7 @@ choose_bandwidth() {
     printf '  2) 500 Mbps\n' >/dev/tty
     printf '  3) 1000 Mbps\n' >/dev/tty
     printf '  4) 自定义 100–10000 Mbps\n' >/dev/tty
-    printf '直接回车使用当前/默认值 %s Mbps：' "$default_speed" >/dev/tty
+    printf '可直接输入 1000/1000M/1000Mbps；回车使用当前/默认值 %s Mbps：' "$default_speed" >/dev/tty
     IFS= read -r choice </dev/tty
     case "$choice" in
       '') PORT_SPEED_MBPS="$default_speed" ;;
@@ -231,9 +253,15 @@ choose_bandwidth() {
       4)
         printf '请输入套餐标称带宽 Mbps：' >/dev/tty
         IFS= read -r custom_speed </dev/tty
-        PORT_SPEED_MBPS="$custom_speed"
+        normalized="$(normalize_bandwidth_input "$custom_speed")" ||
+          die '带宽格式无效；可填写 1000、1000M 或 1000Mbps。'
+        PORT_SPEED_MBPS="$normalized"
         ;;
-      *) die '无效的带宽选项。' ;;
+      *)
+        normalized="$(normalize_bandwidth_input "$choice")" ||
+          die '无效的带宽选项；请输入 1–4，或 100–10000Mbps。'
+        PORT_SPEED_MBPS="$normalized"
+        ;;
     esac
   else
     PORT_SPEED_MBPS="$default_speed"
@@ -241,9 +269,11 @@ choose_bandwidth() {
 }
 
 choose_target_rtt() {
-  local saved default_rtt choice custom_rtt
+  local saved default_rtt choice custom_rtt normalized
   if [ -n "$BUFFER_TARGET_RTT_MS_INPUT" ]; then
-    BUFFER_TARGET_RTT_MS="$BUFFER_TARGET_RTT_MS_INPUT"
+    normalized="$(normalize_rtt_input "$BUFFER_TARGET_RTT_MS_INPUT")" ||
+      die 'BUFFER_TARGET_RTT_MS 格式无效；可填写 175、175ms 或 175 ms。'
+    BUFFER_TARGET_RTT_MS="$normalized"
     return 0
   fi
 
@@ -257,7 +287,7 @@ choose_target_rtt() {
     printf '  4) 200 ms（跨境线路常用）\n' >/dev/tty
     printf '  5) 300 ms\n' >/dev/tty
     printf '  6) 自定义 20–500 ms\n' >/dev/tty
-    printf '直接回车使用当前/默认值 %s ms：' "$default_rtt" >/dev/tty
+    printf '可直接输入 175/175ms/175 ms；回车使用当前/默认值 %s ms：' "$default_rtt" >/dev/tty
     IFS= read -r choice </dev/tty
     case "$choice" in
       '') BUFFER_TARGET_RTT_MS="$default_rtt" ;;
@@ -269,9 +299,15 @@ choose_target_rtt() {
       6)
         printf '请输入目标 RTT ms：' >/dev/tty
         IFS= read -r custom_rtt </dev/tty
-        BUFFER_TARGET_RTT_MS="$custom_rtt"
+        normalized="$(normalize_rtt_input "$custom_rtt")" ||
+          die 'RTT 格式无效；可填写 175、175ms 或 175 ms。'
+        BUFFER_TARGET_RTT_MS="$normalized"
         ;;
-      *) die '无效的 RTT 选项。' ;;
+      *)
+        normalized="$(normalize_rtt_input "$choice")" ||
+          die '无效的 RTT 选项；请输入 1–6，或 20–500ms。'
+        BUFFER_TARGET_RTT_MS="$normalized"
+        ;;
     esac
   else
     BUFFER_TARGET_RTT_MS="$default_rtt"
@@ -379,6 +415,8 @@ select_profile() {
 
   MEMORY_MIB="$(awk '/^MemTotal:/ {print int($2 / 1024); exit}' /proc/meminfo)"
   [[ "$MEMORY_MIB" =~ ^[0-9]+$ ]] || die '无法读取物理内存。'
+  CPU_COUNT="$(awk '/^processor[[:space:]]*:/ {count++} END {print count + 0}' /proc/cpuinfo)"
+  [[ "$CPU_COUNT" =~ ^[1-9][0-9]*$ ]] || CPU_COUNT=1
   if [ "$MEMORY_MIB" -ge 768 ] && [ "$MEMORY_MIB" -le 1536 ]; then
     PROFILE="debian${VERSION_ID}-1c1g-vps-tuning.sh"
   elif [ "$MEMORY_MIB" -gt 1536 ] && [ "$MEMORY_MIB" -le 3072 ]; then
@@ -702,12 +740,21 @@ handle_sysctl_conflicts() {
 show_summary() {
   warn '上游 debian-vps-tuning 仍是 v0.1.0-rc.8 预发布版；请保留服务商控制台或快照。'
   info "包装脚本版本：${WRAPPER_VERSION}"
-  info "档位：${PROFILE}；内存：${MEMORY_MIB} MiB"
+  info "档位：${PROFILE}；CPU：${CPU_COUNT} 核；内存：${MEMORY_MIB} MiB"
   info "妙妙屋X部署：${DEPLOYMENT_MODE}；Xray模式：${XRAY_MODE}"
   info "调优策略：${TUNING_MODE_LABEL}；BDP 缓冲余量：${MODE_BUFFER_PERCENT}%"
   info "套餐带宽：${PORT_SPEED_MBPS} Mbps；目标 RTT：${BUFFER_TARGET_RTT_MS} ms"
   info "理论 BDP：${BUFFER_BDP_BYTES} 字节；余量后需求：${BUFFER_REQUIRED_BYTES} 字节"
   info "socket 缓冲上限：${SELECTED_BUF_MAX} 字节；覆盖约 ${BUFFER_COVERAGE_MS} ms"
+  if [ "$SELECTED_BUF_MAX" -ge "$BUFFER_BDP_BYTES" ]; then
+    info "容量判断：当前缓冲可覆盖 ${PORT_SPEED_MBPS} Mbps / ${BUFFER_TARGET_RTT_MS} ms 理论 BDP。"
+  fi
+  if [ "$MEMORY_MIB" -le 1536 ] && [ "$TUNING_MODE" != 'conservative' ]; then
+    warn "当前约为 1G 内存；实测报告显示保守档已能覆盖常见 BDP，建议优先使用保守调优。"
+  fi
+  if [ "$CPU_COUNT" -eq 1 ] && [ "$PORT_SPEED_MBPS" -ge 1000 ]; then
+    warn '1 核千兆节点在 Xray 加密满载时可能先遇到 CPU 瓶颈；应在真实代理测速时观察 CPU。'
+  fi
   if [ "$PORT_SPEED_MBPS" -gt 1000 ]; then
     warn "自定义带宽超过上游验证范围；使用上游 1000 Mbps 兼容输入和显式 ${SELECTED_BUF_MAX} 字节缓冲。"
   fi
@@ -715,6 +762,136 @@ show_summary() {
     warn '极限调优会提高单连接可增长的 socket 内存上限；1 GiB VPS 必须观察可用内存和 swap。'
   fi
   info "自动 swap：${ENABLE_SWAP}；大小：${SWAP_MB} MiB"
+}
+
+default_route_ifaces_for_diagnostics() {
+  local family
+  for family in -4 -6; do
+    ip -o "$family" route show default 2>/dev/null || true
+  done | awk '{
+    for (i = 1; i <= NF; i++) {
+      if ($i == "dev" && $(i + 1) != "" && !seen[$(i + 1)]++) print $(i + 1)
+    }
+  }'
+}
+
+read_net_counter() {
+  local iface="$1" counter="$2" path
+  path="/sys/class/net/${iface}/statistics/${counter}"
+  if [ -r "$path" ]; then
+    awk 'NR == 1 {print $1; exit}' "$path"
+  else
+    printf '0\n'
+  fi
+}
+
+show_service_nofile_assessment() {
+  local unit main_pid soft hard
+  local -a units=()
+  if [ -n "$PROXY_SERVICE_UNITS" ]; then
+    read -r -a units <<<"$PROXY_SERVICE_UNITS"
+  else
+    units=(mmw-agent.service xray.service)
+  fi
+
+  for unit in "${units[@]}"; do
+    [ "$(systemctl show -p LoadState --value "$unit" 2>/dev/null || true)" = 'loaded' ] || continue
+    main_pid="$(systemctl show -p MainPID --value "$unit" 2>/dev/null || true)"
+    [[ "$main_pid" =~ ^[1-9][0-9]*$ ]] || continue
+    [ -r "/proc/${main_pid}/limits" ] || continue
+    soft=''
+    hard=''
+    if ! IFS=$'\t' read -r soft hard < <(
+      awk '$1 == "Max" && $2 == "open" && $3 == "files" {printf "%s\t%s\n", $4, $5; exit}' "/proc/${main_pid}/limits"
+    ); then
+      warn "无法读取 ${unit} 的 NOFILE 限制。"
+      continue
+    fi
+    if [[ "$soft" =~ ^[0-9]+$ ]]; then
+      if [ "$soft" -lt 65535 ]; then
+        warn "${unit} NOFILE soft=${soft}，低于建议值 65535。"
+      elif [ "$soft" -eq 65535 ]; then
+        info "${unit} NOFILE soft=65535：可接受；与上游提示的 65536 仅差 1。"
+      else
+        info "${unit} NOFILE soft=${soft}：正常。"
+      fi
+    else
+      info "${unit} NOFILE soft=${soft:-unknown} hard=${hard:-unknown}。"
+    fi
+  done
+}
+
+show_runtime_diagnostics() {
+  local actual_rmem actual_wmem actual_min actual_coverage_ms
+  local mem_total_kib mem_available_kib mem_available_percent
+  local swap_total_kib swap_free_kib swap_used_mib
+  local iface qdisc_kind qdisc_drops rx_dropped tx_dropped rx_errors tx_errors
+
+  printf '\n[diagnostics] 轻量运行时诊断\n'
+  actual_rmem="$(sysctl -n net.core.rmem_max 2>/dev/null || true)"
+  actual_wmem="$(sysctl -n net.core.wmem_max 2>/dev/null || true)"
+  if [[ "$actual_rmem" =~ ^[0-9]+$ ]] && [[ "$actual_wmem" =~ ^[0-9]+$ ]]; then
+    actual_min="$actual_rmem"
+    if [ "$actual_wmem" -lt "$actual_min" ]; then actual_min="$actual_wmem"; fi
+    actual_coverage_ms=$((actual_min * 8 / (PORT_SPEED_MBPS * 1000)))
+    printf '[diagnostics] rmem_max=%s wmem_max=%s 覆盖约=%sms 目标=%sms\n' \
+      "$actual_rmem" "$actual_wmem" "$actual_coverage_ms" "$BUFFER_TARGET_RTT_MS"
+    if [ "$actual_min" -ge "$BUFFER_BDP_BYTES" ]; then
+      info '实际 socket 缓冲已覆盖目标 BDP；不需要为追求测速盲目提高档位。'
+    else
+      warn '实际 socket 缓冲低于目标 BDP；请重新执行生效检测或覆盖重装。'
+    fi
+  else
+    warn '无法读取实际 rmem_max/wmem_max。'
+  fi
+
+  mem_total_kib="$(awk '/^MemTotal:/ {print $2; exit}' /proc/meminfo)"
+  mem_available_kib="$(awk '/^MemAvailable:/ {print $2; exit}' /proc/meminfo)"
+  swap_total_kib="$(awk '/^SwapTotal:/ {print $2; exit}' /proc/meminfo)"
+  swap_free_kib="$(awk '/^SwapFree:/ {print $2; exit}' /proc/meminfo)"
+  if [[ "$mem_total_kib" =~ ^[1-9][0-9]*$ ]] && [[ "$mem_available_kib" =~ ^[0-9]+$ ]]; then
+    mem_available_percent=$((mem_available_kib * 100 / mem_total_kib))
+    printf '[diagnostics] CPU=%s核 MemAvailable=%sMiB(%s%%)\n' \
+      "$CPU_COUNT" "$((mem_available_kib / 1024))" "$mem_available_percent"
+    if [ "$mem_available_percent" -lt 15 ]; then
+      warn '可用内存低于 15%；高并发前应检查 Xray/Agent 内存和 swap。'
+    fi
+  fi
+  if [[ "$swap_total_kib" =~ ^[0-9]+$ ]] && [[ "$swap_free_kib" =~ ^[0-9]+$ ]]; then
+    swap_used_mib=$(((swap_total_kib - swap_free_kib) / 1024))
+    printf '[diagnostics] SwapTotal=%sMiB SwapUsed=%sMiB\n' "$((swap_total_kib / 1024))" "$swap_used_mib"
+  fi
+
+  while IFS= read -r iface; do
+    [ -n "$iface" ] || continue
+    case "$iface" in
+      *[!A-Za-z0-9_.:@-]*) warn "跳过异常网卡名：${iface}"; continue ;;
+    esac
+    qdisc_kind="$(tc -j qdisc show dev "$iface" 2>/dev/null | jq -r '.[] | select(.root == true) | .kind' | head -n1 || true)"
+    if ! qdisc_drops="$(tc -s qdisc show dev "$iface" 2>/dev/null |
+      sed -n 's/.*dropped \([0-9][0-9]*\).*/\1/p' |
+      awk '{sum += $1} END {print sum + 0}')"; then
+      qdisc_drops=0
+    fi
+    rx_dropped="$(read_net_counter "$iface" rx_dropped)"
+    tx_dropped="$(read_net_counter "$iface" tx_dropped)"
+    rx_errors="$(read_net_counter "$iface" rx_errors)"
+    tx_errors="$(read_net_counter "$iface" tx_errors)"
+    rx_dropped="${rx_dropped:-0}"
+    tx_dropped="${tx_dropped:-0}"
+    rx_errors="${rx_errors:-0}"
+    tx_errors="${tx_errors:-0}"
+    printf '[diagnostics] iface=%s qdisc=%s qdisc_drop=%s rx_drop=%s tx_drop=%s rx_err=%s tx_err=%s\n' \
+      "$iface" "${qdisc_kind:-unknown}" "$qdisc_drops" "$rx_dropped" "$tx_dropped" "$rx_errors" "$tx_errors"
+    if [ "$rx_errors" -gt 0 ] || [ "$tx_errors" -gt 0 ]; then
+      warn "${iface} 存在网卡错误计数；请结合服务商控制台和多次测试排查。"
+    fi
+  done < <(default_route_ifaces_for_diagnostics)
+
+  if [ "$CPU_COUNT" -eq 1 ] && [ "$PORT_SPEED_MBPS" -ge 1000 ]; then
+    warn '该机器为 1 核千兆档；TcpQuality 原始 TCP 测速正常不代表 Xray 加密也能跑满，请满载时使用 top 观察。'
+  fi
+  show_service_nofile_assessment
 }
 
 run_upstream() {
@@ -812,6 +989,7 @@ perform_install() {
     warn "调优已应用，但妙妙屋X严格验证失败。请运行：bash $0 restore"
     return 1
   fi
+  show_runtime_diagnostics
   info '调优和妙妙屋X服务立即验证通过。'
   printf '\n请先新开一个 SSH 会话测试，然后手动执行 reboot。\n'
   printf '重启后运行：bash %q verify\n' "$0"
@@ -853,6 +1031,7 @@ verify_action() {
   detect_mmwx
   show_summary
   strict_verify
+  show_runtime_diagnostics
   info '重启后验证通过。'
 }
 
@@ -860,6 +1039,7 @@ status_action() {
   prepare
   show_summary
   run_upstream status
+  show_runtime_diagnostics
   if [ -s "$SYSCTL_MIGRATION_MANIFEST" ]; then
     info "存在可恢复的 sysctl 原始备份：${SYSCTL_BACKUP_DIR}"
   else

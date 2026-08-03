@@ -1,11 +1,11 @@
-# 发布 v2 到 GitHub
+# 发布 v2.1.0 到 GitHub
 
 目标仓库：[`Hixname/vps-tune`](https://github.com/Hixname/vps-tune)。
 
 ## 1. 进入本地仓库
 
 ```bash
-cd "/Users/me/Documents/Codex/2026-08-03/alieismy-debian-vps-tuning-https-github/outputs/vps-tune"
+cd "/path/to/vps-tune"
 ```
 
 ## 2. 检查改动
@@ -25,13 +25,13 @@ bash tests/static-check.sh
 
 必须看到所有脚本 `OK`、公式测试通过和最终的“静态检查通过”。
 
-## 4. 提交 v2
+## 4. 提交 v2.1.0
 
 ```bash
 git add .github/workflows/ci.yml CHANGELOG.md PUBLISHING.md README.md SECURITY.md \
   SHA256SUMS install.sh mmwx-vps-tune.sh tests/formula-test.sh tests/static-check.sh
 
-git commit -m "feat: add v2 interactive tuning workflow"
+git commit -m "feat: improve interactive tuning diagnostics"
 ```
 
 ## 5. 推送 main
@@ -46,7 +46,7 @@ git push origin main
 gh run list --repo Hixname/vps-tune --limit 3
 ```
 
-打开最新运行并确认 `static-check` 成功。工作流包括 Bash 语法、ShellCheck、安装器主脚本哈希、项目 SHA-256、三档公式和安全边界测试。
+打开最新运行并确认 `static-check` 成功。工作流包括 Bash 语法、ShellCheck、安装器主脚本哈希、项目 SHA-256、三档公式、175ms/1000Mbps 输入容错和安全边界测试。
 
 ## 7. 从 GitHub 公网预检
 
@@ -61,32 +61,32 @@ curl -fsSL \
 正式发布前至少完成：
 
 1. 全新安装；
-2. 三档公式摘要检查；
-3. 带宽和自定义 RTT；
+2. 三档适用机型和公式摘要检查；
+3. 带宽和自定义 RTT，包括 `1000Mbps`、`175ms` 和 `175 ms`；
 4. 带软链接的 sysctl 冲突迁移；
 5. 立即生效检测；
-6. 重启后生效检测；
+6. 重启后生效检测，确认 BDP、CPU/内存、网卡和 NOFILE 诊断；
 7. 覆盖重新安装；
 8. 恢复原始状态；
 9. 确认原 sysctl 文件哈希与内容恢复；
 10. 确认妙妙屋X节点全程可用。
 
-## 8. 创建 v2.0.0 标签
+## 8. 创建 v2.1.0 标签
 
 只有 Actions 和目标 VPS 测试全部通过后才执行：
 
 ```bash
-git tag -a v2.0.0 -m "vps-tune v2.0.0"
-git push origin v2.0.0
+git tag -a v2.1.0 -m "vps-tune v2.1.0"
+git push origin v2.1.0
 ```
 
 ## 9. 创建 GitHub Release
 
-在 GitHub 的 **Releases → Draft a new release** 中选择 `v2.0.0`，附上：
+在 GitHub 的 **Releases → Draft a new release** 中选择 `v2.1.0`，附上：
 
 ```text
-vps-tune-github.zip
-vps-tune-github.zip.sha256
+vps-tune-v2.1.0.zip
+vps-tune-v2.1.0.zip.sha256
 ```
 
 Release 说明应明确：上游仍为 `v0.1.0-rc.8`，极限档位不适合作为 1 GiB VPS 的默认选择，首次公开使用前应保留服务商控制台或快照。
